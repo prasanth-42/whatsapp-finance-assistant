@@ -3,9 +3,18 @@ from twilio.twiml.messaging_response import MessagingResponse
 from config import TWILIO_WHATSAPP_NUMBER
 import google.generativeai as genai
 import os
+from pymongo import MongoClient
+from pymongo.server_api import ServerApi
+from datetime import datetime
 
 # Load API Key
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+# MongoDB Connection URI
+uri = "mongodb+srv://hackathon:hack123@cluster0.wnxeld3.mongodb.net/?retryWrites=true&w=majority"
+client = MongoClient(uri, server_api=ServerApi('1'))
+db = client["MoneyMitra"]  # Database name
+expenses_collection = db["expenses"]
 
 def analyze_message(message):
     """Use Gemini AI to process messages and detect financial transactions or questions."""
@@ -27,6 +36,30 @@ def analyze_message(message):
 
     return response.text.strip()
 
+def parse_transaction(ai_response):
+    """Extract structured data from AI response"""
+    lines = ai_response.split("\n")
+    data = {}
+    for line in lines:
+        if "Transaction Type" in line:
+            data["type"] = line.split(":")[-1].strip().lower()
+        elif "Amount" in line:
+            data["amount"] = int(line.split(":")[-1].strip())
+        elif "Category" in line:
+            data["category"] = line.split(":")[-1].strip().lower()
+    return data
+
+def store_expense(user, data):
+    """Store a transaction in MongoDB"""
+    transaction = {
+        "user": user,
+        "type": data["type"],
+        "amount": data["amount"],
+        "category": data["category"],
+        "date": datetime.utcnow()
+    }
+    expenses_collection.insert_one(transaction)
+
 app = Flask(__name__)
 
 @app.route('/webhook', methods=['POST'])
@@ -40,7 +73,15 @@ def whatsapp_webhook():
     msg = response.message()
 
     ai_response = analyze_message(incoming_msg)
-    msg.body(ai_response)
+
+    # If AI detects a transaction, store it in MongoDB
+    if "Transaction Type" in ai_response:
+        data = parse_transaction(ai_response)
+        store_expense(sender, data)
+        transaction_message = f"✅ Transaction Recorded: {data['type']} ₹{data['amount']} on {data['category']}."
+        msg.body(transaction_message)
+    else:
+        msg.body(ai_response)
 
     return str(response)
 
