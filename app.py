@@ -1,6 +1,31 @@
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 from config import TWILIO_WHATSAPP_NUMBER
+import google.generativeai as genai
+import os
+
+# Load API Key
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+def analyze_message(message):
+    """Use Gemini AI to process messages and detect financial transactions or questions."""
+    
+    prompt = f"""
+    You are a financial assistant. 
+    If the user logs a financial transaction, extract:
+      - Transaction Type (Received/Spent)
+      - Amount (Numeric)
+      - Category (Text)
+    If the user asks a general finance question, provide an informative answer.
+
+    Message: "{message}"
+    """
+
+    # Use the correct model name
+    model = genai.GenerativeModel("gemini-1.5-flash-latest")
+    response = model.generate_content(prompt)
+
+    return response.text.strip()
 
 app = Flask(__name__)
 
@@ -14,13 +39,8 @@ def whatsapp_webhook():
     response = MessagingResponse()
     msg = response.message()
 
-    # Simple Bot Logic
-    if "hello" in incoming_msg.lower():
-        msg.body("Hello! 👋 I'm your personal finance assistant. How can I help you today? 😊")
-    elif "bye" in incoming_msg.lower():
-        msg.body("Goodbye! 👋 Stay financially smart and see you next time! 💰")
-    else:
-        msg.body("I'm here to help with your finances! Try saying 'log an expense', 'set a budget', or 'show my report'. 😊")
+    ai_response = analyze_message(incoming_msg)
+    msg.body(ai_response)
 
     return str(response)
 
